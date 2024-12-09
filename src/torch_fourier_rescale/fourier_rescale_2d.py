@@ -5,9 +5,9 @@ from math import ceil, floor
 import numpy as np
 import torch
 import torch.nn.functional as F
-
 from .utils import get_target_fftfreq
 
+torch.set_printoptions(threshold=float('inf'))
 
 def fourier_rescale_2d(
     image: torch.Tensor,
@@ -38,12 +38,16 @@ def fourier_rescale_2d(
         target_spacing = (target_spacing, target_spacing)
     if source_spacing == target_spacing:
         return image, source_spacing
+   
+    import matplotlib.pyplot as plt
+    def showme(image):
+        plt.imshow(image.squeeze(0),cmap='grey')
+        plt.show()
 
     # place image center at array indices [0, 0] and compute centered rfft2
     image = torch.fft.fftshift(image, dim=(-2, -1))
     dft = torch.fft.rfftn(image, dim=(-2, -1))
     dft = torch.fft.fftshift(dft, dim=(-2,))
-
     # Fourier pad/crop
     dft, new_nyquist = fourier_rescale_rfft_2d(
         dft=dft,
@@ -51,7 +55,6 @@ def fourier_rescale_2d(
         source_spacing=source_spacing,
         target_spacing=target_spacing
     )
-
     # transform back to real space and recenter
     dft = torch.fft.ifftshift(dft, dim=(-2,))
     rescaled_image = torch.fft.irfftn(dft, dim=(-2, -1))
@@ -84,12 +87,24 @@ def fourier_rescale_rfft_2d(
     return dft, (nyquist_h, nyquist_w)
 
 
+def custom_fftfreq_with_double_zero(N):
+    # Shift frequencies
+    freqs = torch.fft.fftshift(torch.fft.fftfreq(N))
+    # Add an extra zero in the center manually and remove most negative frequency (maintain symmetry)
+    mid_idx = len(freqs) // 2
+    freqs = torch.cat([freqs[:mid_idx], torch.tensor([0.0]), freqs[mid_idx:]])[1:]
+    return freqs
+
+
 def _fourier_crop_h(dft: torch.Tensor, image_height: int, target_fftfreq: float):
+    '''
     frequencies = torch.fft.fftfreq(image_height)
     frequencies = torch.fft.fftshift(frequencies)
+    '''
+    frequencies = custom_fftfreq_with_double_zero(image_height)
     idx_nyquist = torch.argmin(torch.abs(frequencies - target_fftfreq))
     new_nyquist = frequencies[idx_nyquist]
-    idx_h = torch.abs(frequencies) <= new_nyquist
+    idx_h = torch.abs(frequencies) < new_nyquist
     return dft[..., idx_h, :], new_nyquist
 
 
